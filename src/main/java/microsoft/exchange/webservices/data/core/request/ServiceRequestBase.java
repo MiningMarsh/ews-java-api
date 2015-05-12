@@ -396,6 +396,39 @@ public abstract class ServiceRequestBase<T> {
   }
 
   /**
+   * Reads the response stream.
+   *
+   * @return serviceResponse
+   * @throws Exception
+   */
+  protected InputStream readResponseStream(HttpWebRequest response) throws Exception {
+    T serviceResponse;
+
+    if (!response.getResponseContentType().startsWith("text/xml")) {
+      String line = new BufferedReader(new InputStreamReader(ServiceRequestBase.getResponseStream(response)))
+          .readLine();
+      throw new ServiceRequestException("The response received from the service didn't contain valid XML.");
+    }
+
+    /**
+     * If tracing is enabled, we read the entire response into a
+     * MemoryStream so that we can pass it along to the ITraceListener. Then
+     * we parse the response from the MemoryStream.
+     */
+    try {
+      this.getService().processHttpResponseHeaders(TraceFlags.EwsResponseHttpHeaders, response);
+      return ServiceRequestBase.getResponseStream(response);
+    } catch (HTTPException e) {
+      if (e.getMessage() != null) {
+        this.getService().processHttpResponseHeaders(TraceFlags.EwsResponseHttpHeaders, response);
+      }
+      throw new ServiceRequestException(String.format("The request failed. %s", e.getMessage()), e);
+    } catch (IOException e) {
+      throw new ServiceRequestException(String.format("The request failed. %s", e.getMessage()), e);
+    }
+  }
+
+  /**
    * Reads the response.
    *
    * @return serviceResponse
@@ -417,13 +450,9 @@ public abstract class ServiceRequestBase<T> {
      */
 
     try {
-      this.getService().processHttpResponseHeaders(
-          TraceFlags.EwsResponseHttpHeaders, response);
-
       if (this.getService().isTraceEnabledFor(TraceFlags.EwsResponse)) {
         ByteArrayOutputStream memoryStream = new ByteArrayOutputStream();
-        InputStream serviceResponseStream = ServiceRequestBase
-            .getResponseStream(response);
+        InputStream serviceResponseStream = readResponseStream(response);
 
         int data = serviceResponseStream.read();
         while (data != -1) {
@@ -440,8 +469,8 @@ public abstract class ServiceRequestBase<T> {
         serviceResponseStream.close();
         memoryStream.flush();
       } else {
-        InputStream responseStream = ServiceRequestBase
-            .getResponseStream(response);
+        InputStream responseStream = readResponseStream(response);
+
         EwsServiceXmlReader ewsXmlReader = new EwsServiceXmlReader(
             responseStream, this.getService());
         serviceResponse = this.readResponse(ewsXmlReader);
